@@ -1,27 +1,24 @@
-'''
-
+"""
 This file contains classes and functions that implement the PyPXE DHCP service
-
-'''
-
+"""
 import socket
 import struct
-import os
 import logging
 from collections import defaultdict
 from time import time
+
 
 class OutOfLeasesError(Exception):
     pass
 
 
 class DHCPD:
-    '''
-        This class implements a DHCP Server, limited to PXE options.
-        Implemented from RFC2131, RFC2132,
-        https://en.wikipedia.org/wiki/Dynamic_Host_Configuration_Protocol,
-        and http://www.pix.net/software/pxeboot/archive/pxespec.pdf.
-    '''
+    """
+    This class implements a DHCP Server, limited to PXE options.
+    Implemented from RFC2131, RFC2132,
+    https://en.wikipedia.org/wiki/Dynamic_Host_Configuration_Protocol,
+    and http://www.pix.net/software/pxeboot/archive/pxespec.pdf.
+    """
     def __init__(self, **server_settings):
 
         self.ip = server_settings.get('ip', '192.168.2.2')
@@ -41,15 +38,15 @@ class DHCPD:
             self.force_file_name = True
         self.ipxe = server_settings.get('use_ipxe', False)
         self.http = server_settings.get('use_http', False)
-        self.mode_proxy = server_settings.get('mode_proxy', False) # ProxyDHCP mode
+        self.mode_proxy = server_settings.get('mode_proxy', False)  # ProxyDHCP mode
         self.static_config = server_settings.get('static_config', dict())
         self.whitelist = server_settings.get('whitelist', False)
-        self.mode_debug = server_settings.get('mode_debug', False) # debug mode
+        self.mode_debug = server_settings.get('mode_debug', False)  # debug mode
         self.logger = server_settings.get('logger', None)
-        self.magic = struct.pack('!I', 0x63825363) # magic cookie
+        self.magic = struct.pack('!I', 0x63825363)  # magic cookie
 
         # setup logger
-        if self.logger == None:
+        if self.logger is None:
             self.logger = logging.getLogger('DHCP')
             handler = logging.StreamHandler()
             formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s %(message)s')
@@ -90,22 +87,22 @@ class DHCPD:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self.sock.bind(('', self.port ))
+        self.sock.bind(('', self.port))
 
         # key is MAC
         self.leases = defaultdict(lambda: {'ip': '', 'expire': 0, 'ipxe': self.ipxe})
 
-    def get_namespaced_static(self, path, fallback = {}):
+    def get_namespaced_static(self, path, fallback={}):
         statics = self.static_config
         for child in path.split('.'):
             statics = statics.get(child, {})
         return statics if statics else fallback
 
     def next_ip(self):
-        '''
-            This method returns the next unleased IP from range;
-            also does lease expiry by overwrite.
-        '''
+        """
+        This method returns the next unleased IP from range;
+        also does lease expiry by overwrite.
+        """
 
         # if we use ints, we don't have to deal with octet overflow
         # or nested loops (up to 3 with 10/8); convert both to 32-bit integers
@@ -121,7 +118,7 @@ class DHCPD:
 
         # pull out already leased IPs
         leased = [self.leases[i]['ip'] for i in self.leases
-                if self.leases[i]['expire'] > time()]
+                  if self.leases[i]['expire'] > time()]
 
         # convert to 32-bit int
         leased = map(encode, leased)
@@ -133,18 +130,18 @@ class DHCPD:
         raise OutOfLeasesError('Ran out of IP addresses to lease!')
 
     def tlv_encode(self, tag, value):
-        '''Encode a TLV option.'''
+        """Encode a TLV option."""
         return struct.pack('BB', tag, len(value)) + value
 
     def tlv_parse(self, raw):
-        '''Parse a string of TLV-encoded options.'''
+        """Parse a string of TLV-encoded options."""
         ret = {}
         while(raw):
             [tag] = struct.unpack('B', raw[0])
-            if tag == 0: # padding
+            if tag == 0:  # padding
                 raw = raw[1:]
                 continue
-            if tag == 255: # end marker
+            if tag == 255:  # end marker
                 break
             [length] = struct.unpack('B', raw[1])
             value = raw[2:2 + length]
@@ -156,68 +153,70 @@ class DHCPD:
         return ret
 
     def get_mac(self, mac):
-        '''
-            This method converts the MAC Address from binary to
-            human-readable format for logging.
-        '''
+        """
+        This method converts the MAC Address from binary to
+        human-readable format for logging.
+        """
         return ':'.join(map(lambda x: hex(x)[2:].zfill(2), struct.unpack('BBBBBB', mac))).upper()
 
     def craft_header(self, message):
-        '''This method crafts the DHCP header using parts of the message.'''
+        """
+        This method crafts the DHCP header using parts of the message.
+        """
         xid, flags, yiaddr, giaddr, chaddr = struct.unpack('!4x4s2x2s4x4s4x4s16s', message[:44])
         client_mac = chaddr[:6]
 
         # op, htype, hlen, hops, xid
-        response =  struct.pack('!BBBB4s', 2, 1, 6, 0, xid)
+        response = struct.pack('!BBBB4s', 2, 1, 6, 0, xid)
         if not self.mode_proxy:
-            response += struct.pack('!HHI', 0, 0, 0) # secs, flags, ciaddr
+            response += struct.pack('!HHI', 0, 0, 0)  # secs, flags, ciaddr
         else:
             response += struct.pack('!HHI', 0, 0x8000, 0)
         if not self.mode_proxy:
-            if self.leases[client_mac]['ip']: # OFFER
+            if self.leases[client_mac]['ip']:  # OFFER
                 offer = self.leases[client_mac]['ip']
-            else: # ACK
+            else:  # ACK
                 offer = self.get_namespaced_static('dhcp.binding.{0}.ipaddr'.format(self.get_mac(client_mac)))
                 offer = offer if offer else self.next_ip()
                 self.leases[client_mac]['ip'] = offer
                 self.leases[client_mac]['expire'] = time() + 86400
                 self.logger.debug('New Assignment - MAC: {0} -> IP: {1}'.format(self.get_mac(client_mac), self.leases[client_mac]['ip']))
-            response += socket.inet_aton(offer) # yiaddr
+            response += socket.inet_aton(offer)  # yiaddr
         else:
             response += socket.inet_aton('0.0.0.0')
-        response += socket.inet_aton(self.file_server) # siaddr
-        response += socket.inet_aton('0.0.0.0') # giaddr
-        response += chaddr # chaddr
+        response += socket.inet_aton(self.file_server)  # siaddr
+        response += socket.inet_aton('0.0.0.0')  # giaddr
+        response += chaddr  # chaddr
 
         # BOOTP legacy pad
-        response += chr(0) * 64 # server name
+        response += chr(0) * 64  # server name
         if self.mode_proxy:
             response += self.file_name
             response += chr(0) * (128 - len(self.file_name))
         else:
             response += chr(0) * 128
-        response += self.magic # magic section
+        response += self.magic  # magic section
         return (client_mac, response)
 
     def craft_options(self, opt53, client_mac):
-        '''
-            This method crafts the DHCP option fields
-            opt53:
-                2 - DHCPOFFER
-                5 - DHCPACK
-            See RFC2132 9.6 for details.
-        '''
-        response = self.tlv_encode(53, chr(opt53)) # message type, OFFER
-        response += self.tlv_encode(54, socket.inet_aton(self.ip)) # DHCP Server
+        """
+        This method crafts the DHCP option fields
+        opt53:
+            2 - DHCPOFFER
+            5 - DHCPACK
+        See RFC2132 9.6 for details.
+        """
+        response = self.tlv_encode(53, chr(opt53))  # message type, OFFER
+        response += self.tlv_encode(54, socket.inet_aton(self.ip))  # DHCP Server
         if not self.mode_proxy:
             subnet_mask = self.get_namespaced_static('dhcp.binding.{0}.subnet'.format(self.get_mac(client_mac)), self.subnet_mask)
-            response += self.tlv_encode(1, socket.inet_aton(subnet_mask)) # subnet mask
+            response += self.tlv_encode(1, socket.inet_aton(subnet_mask))  # subnet mask
             router = self.get_namespaced_static('dhcp.binding.{0}.router'.format(self.get_mac(client_mac)), self.router)
-            response += self.tlv_encode(3, socket.inet_aton(router)) # router
+            response += self.tlv_encode(3, socket.inet_aton(router))  # router
             dns_server = self.get_namespaced_static('dhcp.binding.{0}.dns'.format(self.get_mac(client_mac)), [self.dns_server])
             dns_server = ''.join([socket.inet_aton(i) for i in dns_server])
             response += self.tlv_encode(6, dns_server)
-            response += self.tlv_encode(51, struct.pack('!I', 86400)) # lease time
+            response += self.tlv_encode(51, struct.pack('!I', 86400))  # lease time
 
         # TFTP Server OR HTTP Server; if iPXE, need both
         response += self.tlv_encode(66, self.file_server)
@@ -227,19 +226,23 @@ class DHCPD:
             # http://www.syslinux.org/wiki/index.php/PXELINUX#UEFI
             if 93 in self.leases[client_mac]['options'] and not self.force_file_name:
                 [arch] = struct.unpack("!H", self.leases[client_mac]['options'][93][0])
-                if arch == 0: # BIOS/default
+                # BIOS/default
+                if arch == 0:
                     response += self.tlv_encode(67, 'pxelinux.0' + chr(0))
-                elif arch == 6: # EFI IA32
+                # EFI IA32
+                elif arch == 6:
                     response += self.tlv_encode(67, 'syslinux.efi32' + chr(0))
-                elif arch == 7: # EFI BC, x86-64 (according to the above link)
+                # EFI BC, x86-64 (according to the above link)
+                elif arch == 7:
                     response += self.tlv_encode(67, 'syslinux.efi64' + chr(0))
-                elif arch == 9: # EFI x86-64
+                elif arch == 9:  # EFI x86-64
                     response += self.tlv_encode(67, 'syslinux.efi64' + chr(0))
             else:
                 response += self.tlv_encode(67, self.file_name + chr(0))
         else:
-            response += self.tlv_encode(67, 'chainload.kpxe' + chr(0)) # chainload iPXE
-            if opt53 == 5: # ACK
+            response += self.tlv_encode(67, 'chainload.kpxe' + chr(0))  # chainload iPXE
+            # ACK
+            if opt53 == 5:
                 self.leases[client_mac]['ipxe'] = False
         if self.mode_proxy:
             response += self.tlv_encode(60, 'PXEClient')
@@ -248,9 +251,9 @@ class DHCPD:
         return response
 
     def dhcp_offer(self, message):
-        '''This method responds to DHCP discovery with offer.'''
+        """This method responds to DHCP discovery with offer."""
         client_mac, header_response = self.craft_header(message)
-        options_response = self.craft_options(2, client_mac) # DHCPOFFER
+        options_response = self.craft_options(2, client_mac)  # DHCPOFFER
         response = header_response + options_response
         self.logger.debug('DHCPOFFER - Sending the following')
         self.logger.debug('<--BEGIN HEADER-->')
@@ -265,9 +268,9 @@ class DHCPD:
         self.sock.sendto(response, (self.broadcast, 68))
 
     def dhcp_ack(self, message):
-        '''This method responds to DHCP request with acknowledge.'''
+        """This method responds to DHCP request with acknowledge."""
         client_mac, header_response = self.craft_header(message)
-        options_response = self.craft_options(5, client_mac) # DHCPACK
+        options_response = self.craft_options(5, client_mac)  # DHCPACK
         response = header_response + options_response
         self.logger.debug('DHCPACK - Sending the following')
         self.logger.debug('<--BEGIN HEADER-->')
@@ -294,7 +297,7 @@ class DHCPD:
         return False
 
     def listen(self):
-        '''Main listen loop.'''
+        """Main listen loop."""
         while True:
             message, address = self.sock.recvfrom(1024)
             [client_mac] = struct.unpack('!28x6s', message[:34])
@@ -309,7 +312,7 @@ class DHCPD:
             self.logger.debug('<--END OPTIONS-->')
             if not self.validate_req(client_mac):
                 continue
-            type = ord(self.leases[client_mac]['options'][53][0]) # see RFC2131, page 10
+            type = ord(self.leases[client_mac]['options'][53][0])  # see RFC2131, page 10
             if type == 1:
                 self.logger.debug('Received DHCPOFFER')
                 try:

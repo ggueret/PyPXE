@@ -1,30 +1,27 @@
-'''
-
+"""
 This file contains classes and functions that implement the PyPXE HTTP service
-
-'''
-
+"""
 import socket
-import struct
 import os
 import threading
 import logging
 
+
 class HTTPD:
-    '''
-        This class implements a HTTP Server, limited to GET and HEAD,
-        from RFC2616, RFC7230.
-    '''
+    """
+    This class implements a HTTP Server, limited to GET and HEAD,
+    from RFC2616, RFC7230.
+    """
     def __init__(self, **server_settings):
 
         self.ip = server_settings.get('ip', '0.0.0.0')
         self.port = server_settings.get('port', 80)
         self.netboot_directory = server_settings.get('netboot_directory', '.')
-        self.mode_debug = server_settings.get('mode_debug', False) # debug mode
-        self.logger =  server_settings.get('logger', None)
+        self.mode_debug = server_settings.get('mode_debug', False)  # debug mode
+        self.logger = server_settings.get('logger', None)
 
         # setup logger
-        if self.logger == None:
+        if self.logger is None:
             self.logger = logging.getLogger('HTTP')
             handler = logging.StreamHandler()
             formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s %(message)s')
@@ -41,8 +38,8 @@ class HTTPD:
 
         # start in network boot file directory and then chroot,
         # this simplifies target later as well as offers a slight security increase
-        os.chdir (self.netboot_directory)
-        os.chroot ('.')
+        os.chdir(self.netboot_directory)
+        os.chroot('.')
 
         self.logger.debug('NOTICE: HTTP server started in debug mode. HTTP server is using the following:')
         self.logger.debug('Server IP: {0}'.format(self.ip))
@@ -50,9 +47,9 @@ class HTTPD:
         self.logger.debug('Network Boot Directory: {0}'.format(self.netboot_directory))
 
     def handle_request(self, connection, addr):
-        '''This method handles HTTP request.'''
+        """This method handles HTTP request."""
         request = connection.recv(1024)
-        self.logger.debug('Recieved message from {addr}'.format(addr = repr(addr)))
+        self.logger.debug('Recieved message from {addr}'.format(addr=repr(addr)))
         self.logger.debug('<--BEGIN MESSAGE-->')
         self.logger.debug('{0}'.format(repr(request)))
         self.logger.debug('<--END MESSAGE-->')
@@ -64,7 +61,7 @@ class HTTPD:
         else:
             status = '200 OK'
         response = 'HTTP/1.1 {0}\r\n'.format(status)
-        if status[:3] in ('404', '501'): # fail out
+        if status[:3] in ('404', '501'):  # fail out
             connection.send(response)
             connection.close()
             self.logger.debug('Sending message to {0}'.format(repr(addr)))
@@ -87,12 +84,13 @@ class HTTPD:
         handle.close()
         connection.send(response)
         connection.close()
-        self.logger.debug('File Sent - http://{target} -> {addr[0]}:{addr[1]}'.format(target = target, addr = addr))
+        self.logger.debug('File Sent - http://{target} -> {addr[0]}:{addr[1]}'.format(
+            target=target, addr=addr))
 
     def listen(self):
-        '''This method is the main loop that listens for requests.'''
+        """This method is the main loop that listens for requests."""
         while True:
             conn, addr = self.sock.accept()
-            client = threading.Thread(target = self.handle_request, args = (conn, addr))
-            client.daemon = True;
+            client = threading.Thread(target=self.handle_request, args=(conn, addr))
+            client.daemon = True
             client.start()

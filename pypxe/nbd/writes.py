@@ -1,5 +1,6 @@
 import io
 
+
 class COW:
     def basepages(self, offset, length):
         # basepages is (page base addr, inter page offset, length of data in page)
@@ -77,6 +78,7 @@ class COW:
                 self.fh.write(data[:length])
                 data = data[length:]
 
+
 class DiskCOW(COW):
     def __init__(self, addr, imagefd, logger, seek_lock):
         # optional argset for disk diff path
@@ -84,13 +86,14 @@ class DiskCOW(COW):
         self.imagefd = imagefd
         self.seek_lock = seek_lock
         self.logger = logger.getChild('FS')
-        self.logger.debug('Copy-On-Write for {addr} in PyPXE_NBD_COW_{addr[0]}_{addr[1]}'.format(addr = addr))
+        self.logger.debug('Copy-On-Write for {addr} in PyPXE_NBD_COW_{addr[0]}_{addr[1]}'.format(addr=addr))
 
         # never want readonly cow, also definately creating file
-        self.fh = open('PyPXE_NBD_COW_{addr[0]}_{addr[1]}'.format(addr = addr), 'w+b')
+        self.fh = open('PyPXE_NBD_COW_{addr[0]}_{addr[1]}'.format(addr=addr), 'w+b')
         # pages is a list of the addresses for which we have different pages
         # should all be multiples of 4096
         self.pages = []
+
 
 class MemCOW(COW):
     def __init__(self, addr, imagefd, logger, seek_lock):
@@ -105,6 +108,7 @@ class MemCOW(COW):
         # pages is a list of the addresses for which we have different pages
         # should all be multiples of 4096
         self.pages = []
+
 
 class RW:
     def __init__(self, addr, imagefd, logger, seek_lock):
@@ -130,8 +134,9 @@ class RW:
         self.imagefd.write(data)
         self.seek_lock.release()
 
+
 def write(cow, in_mem):
-    '''Class signatures are identical so we can transparently use either.'''
+    """Class signatures are identical so we can transparently use either."""
     if cow and in_mem:
         return MemCOW
     elif cow and not in_mem:

@@ -2,25 +2,25 @@ import logging
 import socket
 import struct
 import threading
-import sys
 import os
 import io
 import writes
 
+
 class NBD:
     def __init__(self, **server_settings):
         self.bd = server_settings.get('block_device', '')
-        self.write = server_settings.get('write', False) # write?
-        self.cow = server_settings.get('cow', True) # COW is the safe default
+        self.write = server_settings.get('write', False)  # write?
+        self.cow = server_settings.get('cow', True)  # COW is the safe default
         self.in_mem = server_settings.get('in_mem', False)
         self.copy_to_ram = server_settings.get('copy_to_ram', False)
         self.ip = server_settings.get('ip', '0.0.0.0')
         self.port = server_settings.get('port', 10809)
-        self.mode_debug = server_settings.get('mode_debug', False) # debug mode
-        self.logger =  server_settings.get('logger', None)
+        self.mode_debug = server_settings.get('mode_debug', False)  # debug mode
+        self.logger = server_settings.get('logger', None)
 
         # setup logger
-        if self.logger == None:
+        if self.logger is None:
             self.logger = logging.getLogger('NBD')
             handler = logging.StreamHandler()
             formatter = logging.Formatter('%(asctime)s %(name)s [%(levelname)s] %(message)s')
@@ -59,7 +59,7 @@ class NBD:
             self.logger.info('Finished copying {0} to RAM'.format(self.bd))
 
     def send_reply(self, conn, addr, code, data):
-        '''Send a reply with magic, only used for error codes.'''
+        """Send a reply with magic, only used for error codes."""
         reply = struct.pack('!Q', 0x3e889045565a9)
         reply += struct.pack('!I', code)
         reply += struct.pack('!I', len(data))
@@ -67,7 +67,7 @@ class NBD:
         conn.send(reply)
 
     def handshake(self, conn, addr):
-        '''Initiate the connection, server sends first.'''
+        """Initiate the connection, server sends first."""
         # mostly taken from https://github.com/yoe/nbd/blob/master/nbd-server.c
         conn.send('NBDMAGIC')
         # 0x49484156454F5054
@@ -78,7 +78,8 @@ class NBD:
         [cflags] = struct.unpack('!I', conn.recv(4))
 
         op = 0
-        while op != 1: # NBD_OPT_EXPORT_NAME
+        # NBD_OPT_EXPORT_NAME
+        while op != 1:
             [magic] = struct.unpack("!Q", conn.recv(8))
             [op] = struct.unpack("!I", conn.recv(4))
             if op != 1:
@@ -95,15 +96,16 @@ class NBD:
 
         # size of export
         exportinfo = struct.pack('!Q', self.bdsize)
-        flags = (0 if self.write else 2) # readonly?
+        flags = (0 if self.write else 2)  # readonly?
         exportinfo += struct.pack('!H', flags)
         exportinfo += chr(0) * (0 if (cflags & 2) else 124)
         conn.send(exportinfo)
 
     def handle_client(self, conn, addr, seeklock):
-        '''Handle all client actions, R/W/Disconnect'''
+        """Handle all client actions, R/W/Disconnect"""
         ret = self.handshake(conn, addr)
-        if ret: return # client did something wrong, so we closed them
+        if ret:
+            return  # client did something wrong, so we closed them
 
         FS = writes.write(self.cow, self.in_mem)(addr, self.openbd, self.logger, seeklock)
 
@@ -118,16 +120,17 @@ class NBD:
                 # NBD_REP_ERR_UNSUP
                 self.send_reply(conn, addr, 2 ** 31 + 1, '')
                 continue
-            if opcode == 0: # READ
+            # READ
+            if opcode == 0:
                 data = FS.read(offset, length)
 
                 response = struct.pack('!I', 0x67446698)
-                response += struct.pack('!I', 0) # error
+                response += struct.pack('!I', 0)  # error
                 response += struct.pack('!Q', handle)
                 conn.send(response)
                 conn.send(data)
 
-            elif opcode == 1: # WRITE
+            elif opcode == 1:  # WRITE
                 # WAIT because if there's any lag at all we don't get the whole
                 # thing, we don't write the whole thing, and then we break
                 # trying to parse the rest of the data
@@ -135,25 +138,25 @@ class NBD:
                 FS.write(offset, data)
 
                 response = struct.pack('!I', 0x67446698)
-                response += struct.pack('!I', 0) # error
+                response += struct.pack('!I', 0)  # error
                 response += struct.pack('!Q', handle)
                 conn.send(response)
 
-            elif opcode == 2: # DISCONNECT
+            elif opcode == 2:  # DISCONNECT
                 # delete COW diff
                 conn.close()
                 self.logger.debug('{0} disconnected'.format(addr))
                 return
 
     def listen(self):
-        '''This method is the main loop that listens for requests.'''
+        """This method is the main loop that listens for requests."""
         seeklock = threading.Lock()
         cowfiles = []
         while True:
             try:
                 conn, addr = self.sock.accept()
                 # split off on a thread, allows us to handle multiple clients
-                dispatch = threading.Thread(target = self.handle_client, args = (conn, addr, seeklock))
+                dispatch = threading.Thread(target=self.handle_client, args=(conn, addr, seeklock))
                 # clients don't necessarily close the TCP connection
                 # so we use this to kill the program on ctrl-c
                 dispatch.daemon = True
@@ -161,7 +164,7 @@ class NBD:
                 # this is for the cleanup at the end. Will need clarifying
                 # if MemCOW
                 if self.cow and not self.in_mem:
-                    cowfiles.append('PyPXE_NBD_COW_{addr[0]}_{addr[1]}'.format(addr = addr))
+                    cowfiles.append('PyPXE_NBD_COW_{addr[0]}_{addr[1]}'.format(addr=addr))
             except KeyboardInterrupt:
                 map(os.remove, cowfiles)
                 return
